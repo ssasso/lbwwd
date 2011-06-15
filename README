@@ -1,0 +1,4 @@
+lbwwd is designed for use with HAProxy
+
+It polls backend server load to dynamically change their weight on haproxy.
+
