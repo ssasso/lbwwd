@@ -1,4 +1,74 @@
 lbwwd is designed for use with HAProxy
 
-It polls backend server load to dynamically change their weight on haproxy.
+It polls backend server load to dynamically change their weight on haproxy through haproxy socket.
+
+
+How to start lbwwd:
+* all parameters are mandatory
+* required system user lbwwd with write privilege on log dir and haproxy socket
+
+/srv/libexec/watchdog/lbwwd -i 60 -b dynamic -s w215:192.168.213.215:80,w216:192.168.213.216:80, -l /srv/log/lbwwd/www_1.log -p /srv/log/lbwwd/www_1.pid -k /srv/sock/haproxy/www_1.sock -u www.mysite.net:/load_check/index.jsp
+
+Parameters:
+-i : poll interval
+-b : backend name
+-s : serverlist; name1:ip1:port1,name2:ip2:port2,name3:ip3:port3,...
+-l : log file location
+-p : pid file location
+-k : haproxy socket location
+-u : check url; http_1.1_host_header:/url or /url; must return a string like LOAD=xxx where 0 < xxx < 100
+
+haproxy is configured like this:
+global
+  daemon
+  maxconn 4096
+  user haproxy
+  group haproxy
+  stats socket /srv/sock/haproxy/www_1.sock user lbwwd group haproxy level admin
+[...cut...]
+backend dynamic
+  cookie LBID insert indirect nocache maxidle 30m maxlife 8h
+  balance roundrobin
+  server w215 192.168.213.215:80 cookie w215 weight 50
+  server w216 192.168.213.216:80 cookie w216 weight 50
+
+
+load check page is like this (jsp)
+<%@page import="java.io.*,java.util.*,javax.management.*,org.apache.commons.modeler.Registry"%><%!
+public int getLoadValue(String workerName){
+  MBeanServer mBeanServer = null;
+  mBeanServer = Registry.getRegistry().getServer();
+  String qry = "Catalina:type=ThreadPool,name="+workerName;
+  Set names = null;
+  try {
+    names=mBeanServer.queryNames(new ObjectName(qry), null);
+    Iterator it=names.iterator();
+    if (it.hasNext()) {
+      ObjectName oname = (ObjectName)it.next();
+      MBeanInfo minfo=mBeanServer.getMBeanInfo(oname);
+      MBeanAttributeInfo attrs[]=minfo.getAttributes();
+      Object value = null;
+      
+      String threadsBusyString = mBeanServer.getAttribute(oname, "currentThreadsBusy").toString();
+      String threadCountString = mBeanServer.getAttribute(oname, "currentThreadCount").toString();
+      
+      int threadsBusy = Integer.parseInt(threadsBusyString.trim());
+      int threadCount = Integer.parseInt(threadCountString.trim());
+	        
+      int rap =(int) ((double)threadsBusy * 100 / (double)threadCount) ;
+      if (rap > 100) rap=100;
+      if (rap < 0) rap = 0;
+	  
+      return rap;
+    }else{
+      return 50;
+    }
+  } catch (Exception e) {
+    return 50;
+  }
+}
+%><%
+int k = getLoadValue("http-80");
+out.println("LOAD="+k);
+%>
 
